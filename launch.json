@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Streamlit: My English Dictionary",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "streamlit",
+      "args": [
+        "run",
+        "${workspaceFolder}/app.py"
+      ],
+      "env": {
+        "FIREBASE_SERVICE_ACCOUNT_PATH": "${workspaceFolder}/my-dictionary-date-base-firebase-adminsdk-fbsvc-36d1f73411.json",
+        "FIRESTORE_DATABASE_ID": "my-dictionary2"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}

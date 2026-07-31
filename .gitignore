@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+work/
+outputs/
+.streamlit/secrets.toml
+firebase-service-account.json
+my-dictionary-date-base-firebase-adminsdk-fbsvc-36d1f73411.json
