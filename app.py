@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import hmac
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -27,28 +26,6 @@ def secret_or_env(name: str) -> str | None:
     except Exception:
         value = None
     return value or os.getenv(name)
-
-
-def require_login() -> bool:
-    """Protect a cloud deployment with a password stored outside the source code."""
-    app_password = secret_or_env("APP_PASSWORD")
-    # Local development remains convenient; cloud deployment always sets APP_PASSWORD.
-    if not app_password:
-        return True
-    if st.session_state.get("authenticated"):
-        return True
-
-    st.title("📚 My English Dictionary")
-    st.info("この辞典は個人用です。アクセス用パスワードを入力してください。")
-    with st.form("login_form"):
-        entered_password = st.text_input("パスワード", type="password")
-        submitted = st.form_submit_button("開く", type="primary")
-    if submitted:
-        if hmac.compare_digest(entered_password, app_password):
-            st.session_state.authenticated = True
-            st.rerun()
-        st.error("パスワードが違います。")
-    return False
 
 
 @st.cache_resource(show_spinner=False)
@@ -257,8 +234,6 @@ def etymology_form(client: Client) -> None:
 
 
 def main() -> None:
-    if not require_login():
-        st.stop()
     st.title("📚 My English Dictionary")
     st.caption("心に残った引用と、単語の語源を自分だけの辞典に。")
     client = get_client()
