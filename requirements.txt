@@ -1,2 +1,5 @@
-streamlit>=1.38.0
-firebase-admin>=6.5.0
+# Streamlit Cloud の自動アップデートによる依存関係の不整合を防ぐため、
+# ローカルで動作確認済みの組み合わせを固定しています。
+streamlit==1.60.0
+starlette==1.3.1
+firebase-admin==6.5.0
