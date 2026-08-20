@@ -288,7 +288,13 @@ def lesson_timeline(client: Client) -> None:
     if not lessons:
         st.info("授業がまだありません。「授業設定・新規」タブから作成してください。")
         return
-    labels = {lesson_label(lesson): lesson for lesson in lessons}
+    unit_tags = sorted({lesson.get("unit") for lesson in lessons if lesson.get("unit")})
+    selected_units = st.multiselect("単元タグで絞り込み", unit_tags, placeholder="単元名を検索・選択", key="timeline_units")
+    filtered_lessons = [lesson for lesson in lessons if not selected_units or lesson.get("unit") in selected_units]
+    if not filtered_lessons:
+        st.info("選択した単元タグに該当する授業はありません。")
+        return
+    labels = {f"{lesson_label(lesson)}（{lesson['id'][-6:]}）": lesson for lesson in filtered_lessons}
     lesson = labels[st.selectbox("表示する授業", list(labels), key="timeline_lesson")]
     if lesson.get("memo"):
         st.caption(f"授業メモ: {lesson['memo']}")
@@ -303,7 +309,10 @@ def lesson_timeline(client: Client) -> None:
     if not cards:
         st.info("まだカードはありません。下の「カードを追加」から記録を始めましょう。")
     for card in cards:
-        with st.container(border=True):
+        elapsed = int(card.get("elapsed_minutes") or 0)
+        category = card.get("category") or "その他"
+        preview = (card.get("content") or "").replace("\n", " ")[:40]
+        with st.expander(f"⏱ {elapsed}分後｜{category}｜{preview}"):
             timeline_card(card)
             with st.popover("削除", icon="🗑️"):
                 st.warning("このタイムラインカードを削除します。元に戻せません。")
