@@ -10,8 +10,16 @@
 | --- | --- |
 | `quotes` | `sentence`, `translation`, `source`, `tags`（文字列配列）, `memo`, `created_at` |
 | `etymologies` | `words`, `root`, `memo`, `created_at` |
+| `lessons` | `title`, `unit`, `lesson_date`, `memo`, `created_at`, `updated_at` |
+| `lesson_cards` | `lesson_id`, `elapsed_minutes`, `category`, `content`, `question`, `created_at`, `updated_at` |
 
 各データには Firestore が自動発行するドキュメントIDも付きます。アプリは `created_at` の降順で取得し、キーワードやタグを画面側で柔軟に絞り込みます。
+
+## 授業タイムライン
+
+サイドバーの **授業タイムライン** から、授業名・単元名・日付を作成し、授業開始からの経過分ごとにカードを記録できます。カードは経過時間順に並び、内容・出題問題・カテゴリを後から編集または削除できます。
+
+授業ごとに **JSONで書き出す** ボタンも用意しており、保存済みの設定とタイムラインカードを一つのファイルとしてエクスポートできます。
 
 ## 1. Firebaseプロジェクトを準備
 

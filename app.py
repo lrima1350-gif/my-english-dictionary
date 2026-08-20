@@ -17,6 +17,7 @@ from google.cloud.firestore_v1 import Client
 st.set_page_config(page_title="My English Dictionary", page_icon="📚", layout="wide")
 
 DEFAULT_TAGS = ["関係代名詞", "仮定法", "分詞構文", "比較", "SVO+C", "時制", "助動詞", "イディオム"]
+DEFAULT_LESSON_CATEGORIES = ["導入", "解説", "問題演習", "グループワーク", "発表", "振り返り", "その他"]
 
 
 def secret_or_env(name: str) -> str | None:
@@ -233,13 +234,138 @@ def etymology_form(client: Client) -> None:
         show_firestore_error("語源を保存", exc)
 
 
+def fetch_lesson_cards(client: Client, lesson_id: str) -> list[dict[str, Any]]:
+    """Load cards for one lesson and sort them by elapsed time in the app."""
+    rows = fetch_rows(client, "lesson_cards")
+    return sorted((row for row in rows if row.get("lesson_id") == lesson_id), key=lambda row: (int(row.get("elapsed_minutes") or 0), str(row.get("created_at") or "")))
+
+
+def lesson_label(lesson: dict[str, Any]) -> str:
+    date, title, unit = lesson.get("lesson_date") or "日付未設定", lesson.get("title") or "無題の授業", lesson.get("unit")
+    return f"{date}｜{title}" + (f"（{unit}）" if unit else "")
+
+
+def lesson_settings(client: Client) -> None:
+    st.subheader("授業・単元の設定")
+    st.caption("授業を作成すると、その授業ごとにタイムラインを記録できます。")
+    with st.form("lesson_form", clear_on_submit=True):
+        title = st.text_input("授業名 *", placeholder="例：英語コミュニケーションI")
+        unit = st.text_input("単元名", placeholder="例：Lesson 3 Food and Culture")
+        lesson_date = st.date_input("授業日", value=datetime.now().date())
+        memo = st.text_area("授業メモ", placeholder="ねらい・準備物など")
+        submitted = st.form_submit_button("授業を作成する", type="primary")
+    if not submitted:
+        return
+    if not title.strip():
+        st.warning("「授業名」は必須です。")
+        return
+    now = datetime.now(timezone.utc)
+    try:
+        client.collection("lessons").add({"title": title.strip(), "unit": unit.strip(), "lesson_date": lesson_date.isoformat(), "memo": memo.strip(), "created_at": now, "updated_at": now})
+        st.success("授業を作成しました。タイムラインタブからカードを追加できます。")
+    except Exception as exc:
+        show_firestore_error("授業を作成", exc)
+
+
+def timeline_card(row: dict[str, Any]) -> None:
+    st.markdown(f"### ⏱ {int(row.get('elapsed_minutes') or 0)}分後　`{row.get('category') or 'その他'}`")
+    if row.get("content"):
+        st.write(row["content"])
+    if row.get("question"):
+        st.info(f"**出題した問題**\n\n{row['question']}")
+    if row.get("updated_at"):
+        st.caption(f"最終更新: {format_date(row['updated_at'])}")
+
+
+def lesson_timeline(client: Client) -> None:
+    st.subheader("授業タイムライン")
+    try:
+        lessons = fetch_rows(client, "lessons")
+    except Exception as exc:
+        show_firestore_error("授業データを取得", exc)
+        return
+    lessons.sort(key=lambda row: (row.get("lesson_date") or "", str(row.get("created_at") or "")), reverse=True)
+    if not lessons:
+        st.info("授業がまだありません。「授業設定・新規」タブから作成してください。")
+        return
+    labels = {lesson_label(lesson): lesson for lesson in lessons}
+    lesson = labels[st.selectbox("表示する授業", list(labels), key="timeline_lesson")]
+    if lesson.get("memo"):
+        st.caption(f"授業メモ: {lesson['memo']}")
+    try:
+        cards = fetch_lesson_cards(client, lesson["id"])
+    except Exception as exc:
+        show_firestore_error("タイムラインを取得", exc)
+        return
+    export_data = {"lesson": {key: value for key, value in lesson.items() if key != "id"}, "timeline_cards": [{key: value for key, value in card.items() if key != "id"} for card in cards]}
+    st.download_button("この授業をJSONで書き出す", data=json.dumps(export_data, ensure_ascii=False, default=str, indent=2), file_name=f"lesson_timeline_{lesson.get('lesson_date', 'record')}.json", mime="application/json")
+    st.caption(f"{len(cards)} 件のカード")
+    if not cards:
+        st.info("まだカードはありません。下の「カードを追加」から記録を始めましょう。")
+    for card in cards:
+        with st.container(border=True):
+            timeline_card(card)
+            with st.popover("削除", icon="🗑️"):
+                st.warning("このタイムラインカードを削除します。元に戻せません。")
+                if st.button("このカードを削除する", type="primary", key=f"delete_lesson_card_{card['id']}"):
+                    delete_document(client, "lesson_cards", card["id"], "タイムラインカード")
+    st.divider()
+    st.subheader("カードを追加")
+    with st.form("lesson_card_form", clear_on_submit=True):
+        elapsed_minutes = st.number_input("経過時間（分） *", min_value=0, step=1, help="授業開始から何分後かを入力します。")
+        category = st.selectbox("カテゴリ", DEFAULT_LESSON_CATEGORIES)
+        content = st.text_area("授業内容 *", placeholder="例：現在完了の用法を解説し、例文を確認した。")
+        question = st.text_area("出題した問題", placeholder="例：次の文を現在完了形に書き換えなさい。")
+        submitted = st.form_submit_button("カードをタイムラインに追加", type="primary")
+    if submitted:
+        if not content.strip():
+            st.warning("「授業内容」は必須です。")
+        else:
+            now = datetime.now(timezone.utc)
+            try:
+                client.collection("lesson_cards").add({"lesson_id": lesson["id"], "elapsed_minutes": int(elapsed_minutes), "category": category, "content": content.strip(), "question": question.strip(), "created_at": now, "updated_at": now})
+                st.success("タイムラインカードを保存しました。")
+                st.rerun()
+            except Exception as exc:
+                show_firestore_error("タイムラインカードを保存", exc)
+    if cards:
+        st.divider()
+        st.subheader("カードを編集")
+        card_labels = {f"{int(card.get('elapsed_minutes') or 0)}分後｜{card.get('category') or 'その他'}｜{card.get('content', '')[:24]}（{card['id'][-6:]}）": card for card in cards}
+        selected_card = card_labels[st.selectbox("編集するカード", list(card_labels), key="edit_lesson_card")]
+        with st.form(f"edit_lesson_card_form_{selected_card['id']}"):
+            elapsed_minutes = st.number_input("経過時間（分）", min_value=0, step=1, value=int(selected_card.get("elapsed_minutes") or 0))
+            category = st.selectbox("カテゴリ", DEFAULT_LESSON_CATEGORIES, index=DEFAULT_LESSON_CATEGORIES.index(selected_card["category"]) if selected_card.get("category") in DEFAULT_LESSON_CATEGORIES else len(DEFAULT_LESSON_CATEGORIES) - 1)
+            content = st.text_area("授業内容", value=selected_card.get("content", ""))
+            question = st.text_area("出題した問題", value=selected_card.get("question", ""))
+            submitted = st.form_submit_button("変更を保存する")
+        if submitted:
+            if not content.strip():
+                st.warning("「授業内容」は必須です。")
+            else:
+                try:
+                    client.collection("lesson_cards").document(selected_card["id"]).update({"elapsed_minutes": int(elapsed_minutes), "category": category, "content": content.strip(), "question": question.strip(), "updated_at": datetime.now(timezone.utc)})
+                    st.success("タイムラインカードを更新しました。")
+                    st.rerun()
+                except Exception as exc:
+                    show_firestore_error("タイムラインカードを更新", exc)
+
+
 def main() -> None:
     st.title("📚 My English Dictionary")
     st.caption("心に残った引用と、単語の語源を自分だけの辞典に。")
     client = get_client()
     if client is None:
         st.stop()
-    page = st.sidebar.radio("メニュー", ["引用", "語源"])
+    page = st.sidebar.radio("メニュー", ["引用", "語源", "授業タイムライン"])
+    if page == "授業タイムライン":
+        timeline_tab, settings_tab = st.tabs(["タイムライン", "授業設定・新規"])
+        with timeline_tab:
+            lesson_timeline(client)
+        with settings_tab:
+            lesson_settings(client)
+        return
+
     list_tab, form_tab = st.tabs(["一覧・検索", "新規登録"])
     if page == "引用":
         with list_tab:
