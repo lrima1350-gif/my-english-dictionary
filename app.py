@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,7 @@ st.set_page_config(page_title="My English Dictionary", page_icon="📚", layout=
 
 DEFAULT_TAGS = ["関係代名詞", "仮定法", "分詞構文", "比較", "SVO+C", "時制", "助動詞", "イディオム"]
 DEFAULT_LESSON_CATEGORIES = ["導入", "解説", "問題演習", "グループワーク", "発表", "振り返り", "その他"]
-READING_LEVELS = ["中学2年", "中学3年", "高校1年", "高校2年", "高校3年", "英検3級", "英検準2級", "英検2級", "大学入学共通テストレベル"]
+READING_LEVELS = ["中学1年", "中学2年", "中学3年", "高校入試"]
 READING_QUESTION_TYPES = ["語順並べ替え問題", "内容一致問題", "空所補充問題", "下線部和訳問題", "指示語・文脈把握問題", "要約・主旨把握問題"]
 
 
@@ -362,18 +363,18 @@ def lesson_timeline(client: Client) -> None:
                     show_firestore_error("タイムラインカードを更新", exc)
 
 
-def build_reading_test_prompt(passage: str, level: str, question_types: list[str], count: int) -> str:
+def build_reading_test_prompt(passage: str, level: str, question_plan: dict[str, int]) -> str:
     return f"""あなたは英語教育のプロフェッショナルな塾講師・教材作成者です。
 以下の英語長文を元に、指定された条件に従って生徒用の小テストと解答・解説を作成してください。
 
 【対象レベル】
 {level}
 
-【作成する問題種別】
-{", ".join(question_types)}
+【作成する問題種別と問題数】
+{chr(10).join(f"- {question_type}: {count}問" for question_type, count in question_plan.items())}
 
 【問題数】
-計 {count} 問
+計 {sum(question_plan.values())} 問
 
 【出力形式の指定】
 必ず以下の2つのセクションに明確に分けて出力してください。
@@ -402,21 +403,48 @@ def split_reading_test_sections(generated_text: str) -> tuple[str, str]:
     return generated_text.strip(), "Geminiの出力を2つのセクションへ分割できませんでした。全文を問題用紙として表示しています。"
 
 
+def make_word_document(title: str, content: str) -> bytes:
+    """Create a downloadable Word document without writing generated text to disk."""
+    from docx import Document
+
+    document = Document()
+    document.add_heading(title, level=0)
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("### "):
+            document.add_heading(stripped[4:], level=1)
+        elif stripped.startswith("## "):
+            document.add_heading(stripped[3:], level=1)
+        elif stripped.startswith("# "):
+            document.add_heading(stripped[2:], level=1)
+        elif stripped.startswith("- "):
+            document.add_paragraph(stripped[2:], style="List Bullet")
+        else:
+            document.add_paragraph(line)
+    buffer = BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
 def reading_test_generator() -> None:
     st.subheader("長文読解テスト・ジェネレータ")
     st.caption("Geminiを利用して、英語長文から問題用紙と解答・解説を作成します。")
     passage = st.text_area("長文テキスト入力", height=260, placeholder="英語長文を貼り付けてください。", key="reading_passage")
-    col_level, col_count = st.columns(2)
-    with col_level:
-        level = st.selectbox("対象レベル", READING_LEVELS, index=2)
-    with col_count:
-        count = st.slider("問題数", min_value=1, max_value=10, value=5)
-    question_types = st.multiselect("問題種別", READING_QUESTION_TYPES, default=["語順並べ替え問題", "内容一致問題", "空所補充問題"])
+    level = st.selectbox("対象レベル", READING_LEVELS, index=2)
+    st.markdown("#### 問題種別ごとの問題数")
+    st.caption("0問にすると、その問題種別は作成しません。合計は1〜10問にしてください。")
+    default_counts = {"語順並べ替え問題": 2, "内容一致問題": 2, "空所補充問題": 1}
+    question_counts = {question_type: st.number_input(f"{question_type}（問）", min_value=0, max_value=10, value=default_counts.get(question_type, 0), step=1, key=f"reading_count_{question_type}") for question_type in READING_QUESTION_TYPES}
+    question_plan = {question_type: int(count) for question_type, count in question_counts.items() if count > 0}
+    total_questions = sum(question_plan.values())
+    st.info(f"合計 {total_questions} 問")
     if st.button("テストを自動生成する", type="primary", use_container_width=True):
         if not passage.strip():
             st.warning("英語長文を入力してください。")
-        elif not question_types:
-            st.warning("問題種別を1つ以上選択してください。")
+        elif not question_plan:
+            st.warning("問題種別ごとの問題数を1問以上にしてください。")
+        elif total_questions > 10:
+            st.warning("問題数の合計は10問以下にしてください。")
         else:
             api_key = secret_or_env("GEMINI_API_KEY")
             if not api_key:
@@ -429,7 +457,7 @@ def reading_test_generator() -> None:
                     with st.spinner("Geminiがテストを作成中..."):
                         # Keep the SDK client alive until the response has been received.
                         gemini_client = genai.Client(api_key=api_key)
-                        response = gemini_client.models.generate_content(model=model, contents=build_reading_test_prompt(passage.strip(), level, question_types, count))
+                        response = gemini_client.models.generate_content(model=model, contents=build_reading_test_prompt(passage.strip(), level, question_plan))
                     generated_text = (response.text or "").strip()
                     if not generated_text:
                         raise ValueError("Geminiからテキストが返されませんでした。")
@@ -445,11 +473,10 @@ def reading_test_generator() -> None:
     question_tab, answer_tab = st.tabs(["問題用紙", "解答・解説"])
     with question_tab:
         st.code(result["question_paper"], language=None)
-        st.download_button("問題用紙をダウンロード", result["question_paper"], "reading_test_questions.txt", "text/plain")
+        st.download_button("問題用紙（Word）をダウンロード", make_word_document("長文読解テスト：問題用紙", result["question_paper"]), "reading_test_questions.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
     with answer_tab:
         st.code(result["answer_key"], language=None)
-        st.download_button("解答・解説をダウンロード", result["answer_key"], "reading_test_answers.txt", "text/plain")
-    st.download_button("問題・解答をまとめてダウンロード", result["full_text"], "reading_test_complete.md", "text/markdown")
+        st.download_button("解答・解説（Word）をダウンロード", make_word_document("長文読解テスト：解答・解説", result["answer_key"]), "reading_test_answers.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
 
 def main() -> None:
