@@ -18,6 +18,8 @@ st.set_page_config(page_title="My English Dictionary", page_icon="📚", layout=
 
 DEFAULT_TAGS = ["関係代名詞", "仮定法", "分詞構文", "比較", "SVO+C", "時制", "助動詞", "イディオム"]
 DEFAULT_LESSON_CATEGORIES = ["導入", "解説", "問題演習", "グループワーク", "発表", "振り返り", "その他"]
+READING_LEVELS = ["中学2年", "中学3年", "高校1年", "高校2年", "高校3年", "英検3級", "英検準2級", "英検2級", "大学入学共通テストレベル"]
+READING_QUESTION_TYPES = ["語順並べ替え問題", "内容一致問題", "空所補充問題", "下線部和訳問題", "指示語・文脈把握問題", "要約・主旨把握問題"]
 
 
 def secret_or_env(name: str) -> str | None:
@@ -360,13 +362,104 @@ def lesson_timeline(client: Client) -> None:
                     show_firestore_error("タイムラインカードを更新", exc)
 
 
+def build_reading_test_prompt(passage: str, level: str, question_types: list[str], count: int) -> str:
+    return f"""あなたは英語教育のプロフェッショナルな塾講師・教材作成者です。
+以下の英語長文を元に、指定された条件に従って生徒用の小テストと解答・解説を作成してください。
+
+【対象レベル】
+{level}
+
+【作成する問題種別】
+{", ".join(question_types)}
+
+【問題数】
+計 {count} 問
+
+【出力形式の指定】
+必ず以下の2つのセクションに明確に分けて出力してください。
+
+### 【問題用紙】
+- 生徒にそのまま印刷・配布できるフォーマットにし、最初に【本文】として元の英文を全文掲載してください。
+- 「語順並べ替え問題」が含まれる場合、本文中の該当箇所を下線部（①, ②など）にし、カッコ内にランダムに並べ替えた単語リストを示してください。（例: [ study / hard / to / dynamic / should ]）
+- 各問題の指示文は日本語で分かりやすく記述してください。
+
+### 【解答・解説】
+- 各問題の正解を明記してください。
+- 語順並べ替え問題については、完成文とその和訳、なぜその語順になるのかの文法ポイント（構文、文型、熟語など）を中高生に分かりやすく解説してください。
+- その他の問題についても、根拠となる本文の該当箇所や文法・語彙のポイントを解説に含めてください。
+
+【英語長文】
+{passage}
+"""
+
+
+def split_reading_test_sections(generated_text: str) -> tuple[str, str]:
+    question_marker, answer_marker = "### 【問題用紙】", "### 【解答・解説】"
+    if question_marker in generated_text and answer_marker in generated_text:
+        _, after_question = generated_text.split(question_marker, 1)
+        question_paper, answer_key = after_question.split(answer_marker, 1)
+        return question_paper.strip(), answer_key.strip()
+    return generated_text.strip(), "Geminiの出力を2つのセクションへ分割できませんでした。全文を問題用紙として表示しています。"
+
+
+def reading_test_generator() -> None:
+    st.subheader("長文読解テスト・ジェネレータ")
+    st.caption("Geminiを利用して、英語長文から問題用紙と解答・解説を作成します。")
+    passage = st.text_area("長文テキスト入力", height=260, placeholder="英語長文を貼り付けてください。", key="reading_passage")
+    col_level, col_count = st.columns(2)
+    with col_level:
+        level = st.selectbox("対象レベル", READING_LEVELS, index=2)
+    with col_count:
+        count = st.slider("問題数", min_value=1, max_value=10, value=5)
+    question_types = st.multiselect("問題種別", READING_QUESTION_TYPES, default=["語順並べ替え問題", "内容一致問題", "空所補充問題"])
+    if st.button("テストを自動生成する", type="primary", use_container_width=True):
+        if not passage.strip():
+            st.warning("英語長文を入力してください。")
+        elif not question_types:
+            st.warning("問題種別を1つ以上選択してください。")
+        else:
+            api_key = secret_or_env("GEMINI_API_KEY")
+            if not api_key:
+                st.error("GEMINI_API_KEY が未設定です。Streamlit Secrets または環境変数に設定してください。")
+            else:
+                try:
+                    from google import genai
+
+                    model = secret_or_env("GEMINI_MODEL") or "gemini-2.5-flash"
+                    with st.spinner("Geminiがテストを作成中..."):
+                        response = genai.Client(api_key=api_key).models.generate_content(model=model, contents=build_reading_test_prompt(passage.strip(), level, question_types, count))
+                    generated_text = (response.text or "").strip()
+                    if not generated_text:
+                        raise ValueError("Geminiからテキストが返されませんでした。")
+                    question_paper, answer_key = split_reading_test_sections(generated_text)
+                    st.session_state["reading_test_result"] = {"question_paper": question_paper, "answer_key": answer_key, "full_text": generated_text}
+                except ImportError:
+                    st.error("google-genai が未インストールです。requirements.txt を更新して再デプロイしてください。")
+                except Exception as exc:
+                    st.error(f"Geminiによるテスト生成に失敗しました: {exc}")
+    result = st.session_state.get("reading_test_result")
+    if not result:
+        return
+    question_tab, answer_tab = st.tabs(["問題用紙", "解答・解説"])
+    with question_tab:
+        st.code(result["question_paper"], language=None)
+        st.download_button("問題用紙をダウンロード", result["question_paper"], "reading_test_questions.txt", "text/plain")
+    with answer_tab:
+        st.code(result["answer_key"], language=None)
+        st.download_button("解答・解説をダウンロード", result["answer_key"], "reading_test_answers.txt", "text/plain")
+    st.download_button("問題・解答をまとめてダウンロード", result["full_text"], "reading_test_complete.md", "text/markdown")
+
+
 def main() -> None:
     st.title("📚 My English Dictionary")
     st.caption("心に残った引用と、単語の語源を自分だけの辞典に。")
     client = get_client()
     if client is None:
         st.stop()
-    page = st.sidebar.radio("メニュー", ["引用", "語源", "授業タイムライン"])
+    page = st.sidebar.radio("メニュー", ["引用", "語源", "授業タイムライン", "長文読解テスト"])
+    if page == "長文読解テスト":
+        reading_test_generator()
+        return
     if page == "授業タイムライン":
         timeline_tab, settings_tab = st.tabs(["タイムライン", "授業設定・新規"])
         with timeline_tab:

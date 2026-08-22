@@ -21,6 +21,15 @@
 
 授業ごとに **JSONで書き出す** ボタンも用意しており、保存済みの設定とタイムラインカードを一つのファイルとしてエクスポートできます。
 
+## 長文読解テスト・ジェネレータ
+
+Gemini APIを利用し、入力した英語長文から問題用紙と解答・解説を生成できます。Streamlit Cloudではアプリの **Settings → Secrets** に次を追加してください。APIキーはソースコードやGitHubへ保存しないでください。
+
+```toml
+GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"
+GEMINI_MODEL = "gemini-2.5-flash" # 任意
+```
+
 ## 1. Firebaseプロジェクトを準備
 
 1. [Firebase Console](https://console.firebase.google.com/) でプロジェクトを作成（または選択）します。
