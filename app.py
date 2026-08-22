@@ -427,7 +427,9 @@ def reading_test_generator() -> None:
 
                     model = secret_or_env("GEMINI_MODEL") or "gemini-2.5-flash"
                     with st.spinner("Geminiがテストを作成中..."):
-                        response = genai.Client(api_key=api_key).models.generate_content(model=model, contents=build_reading_test_prompt(passage.strip(), level, question_types, count))
+                        # Keep the SDK client alive until the response has been received.
+                        gemini_client = genai.Client(api_key=api_key)
+                        response = gemini_client.models.generate_content(model=model, contents=build_reading_test_prompt(passage.strip(), level, question_types, count))
                     generated_text = (response.text or "").strip()
                     if not generated_text:
                         raise ValueError("Geminiからテキストが返されませんでした。")
