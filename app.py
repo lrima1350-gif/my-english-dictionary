@@ -480,15 +480,48 @@ def reading_test_generator() -> None:
 
 
 def main() -> None:
-    st.title("📚 My English Dictionary")
-    st.caption("心に残った引用と、単語の語源を自分だけの辞典に。")
-    client = get_client()
-    if client is None:
-        st.stop()
-    page = st.sidebar.radio("メニュー", ["引用", "語源", "授業タイムライン", "長文読解テスト"])
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = "メインメニュー"
+
+    page = st.session_state.current_page
+    if page == "メインメニュー":
+        st.title("📚 My English Dictionary")
+        st.caption("学習の記録・教材づくりを、ひとつの場所で。")
+        st.divider()
+        st.subheader("メインメニュー")
+        st.caption("使いたい機能のアイコンをクリックしてください。")
+        menu_items = [
+            ("💬", "引用", "映画や小説の引用を記録・検索"),
+            ("🌱", "語源", "単語と語源をつなげて記録"),
+            ("🕒", "授業タイムライン", "授業の流れと出題内容を可視化"),
+            ("📝", "長文読解テスト", "英語長文からテストを自動生成"),
+        ]
+        for start in range(0, len(menu_items), 2):
+            columns = st.columns(2)
+            for column, (icon, label, description) in zip(columns, menu_items[start:start + 2]):
+                with column:
+                    st.markdown(f"### {icon} {label}")
+                    st.caption(description)
+                    if st.button(f"{icon} 開く", key=f"open_{label}", use_container_width=True):
+                        st.session_state.current_page = label
+                        st.rerun()
+        return
+
+    home_column, heading_column = st.columns([1, 12])
+    with home_column:
+        if st.button("⌂", key=f"home_{page}", help="メインメニューへ戻る"):
+            st.session_state.current_page = "メインメニュー"
+            st.rerun()
+    with heading_column:
+        st.title(page)
+
     if page == "長文読解テスト":
         reading_test_generator()
         return
+
+    client = get_client()
+    if client is None:
+        st.stop()
     if page == "授業タイムライン":
         timeline_tab, settings_tab = st.tabs(["タイムライン", "授業設定・新規"])
         with timeline_tab:
