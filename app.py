@@ -20,7 +20,7 @@ st.set_page_config(page_title="My English Dictionary", page_icon="📚", layout=
 DEFAULT_TAGS = ["関係代名詞", "仮定法", "分詞構文", "比較", "SVO+C", "時制", "助動詞", "イディオム"]
 DEFAULT_LESSON_CATEGORIES = ["導入", "解説", "問題演習", "グループワーク", "発表", "振り返り", "その他"]
 READING_LEVELS = ["中学1年", "中学2年", "中学3年", "高校入試"]
-READING_QUESTION_TYPES = ["語順並べ替え問題", "内容一致問題", "空所補充問題", "下線部和訳問題", "指示語・文脈把握問題", "要約・主旨把握問題"]
+READING_QUESTION_TYPES = ["語順並べ替え問題", "和文英訳問題", "内容一致問題", "空所補充問題", "下線部和訳問題", "指示語・文脈把握問題", "要約・主旨把握問題"]
 
 
 def secret_or_env(name: str) -> str | None:
@@ -380,8 +380,9 @@ def build_reading_test_prompt(passage: str, level: str, question_plan: dict[str,
 必ず以下の2つのセクションに明確に分けて出力してください。
 
 ### 【問題用紙】
-- 生徒にそのまま印刷・配布できるフォーマットにし、最初に【本文】として元の英文を全文掲載してください。
-- 「語順並べ替え問題」が含まれる場合、本文中の該当箇所を下線部（①, ②など）にし、カッコ内にランダムに並べ替えた単語リストを示してください。（例: [ study / hard / to / dynamic / should ]）
+- 生徒にそのまま印刷・配布できるフォーマットにし、最初に【本文】を掲載してください。
+- 「語順並べ替え問題」が含まれる場合、本文中の該当英文を空欄（①, ②など）に置き換え、空欄の直後にランダムな単語プールを角括弧で埋め込んでください。（例: ① [ study / hard / to / dynamic / should ]）。本文の外に同じ問題を再掲しないでください。
+- 「和文英訳問題」が含まれる場合、本文中の該当英文を空欄（①, ②など）に置き換え、空欄の直後にその英文の日本語訳を（　）内に埋め込んでください。本文の外に同じ問題を再掲しないでください。
 - 各問題の指示文は日本語で分かりやすく記述してください。
 
 ### 【解答・解説】
@@ -431,10 +432,11 @@ def reading_test_generator() -> None:
     st.caption("Geminiを利用して、英語長文から問題用紙と解答・解説を作成します。")
     passage = st.text_area("長文テキスト入力", height=260, placeholder="英語長文を貼り付けてください。", key="reading_passage")
     level = st.selectbox("対象レベル", READING_LEVELS, index=2)
-    st.markdown("#### 問題種別ごとの問題数")
-    st.caption("0問にすると、その問題種別は作成しません。合計は1〜10問にしてください。")
+    selected_question_types = st.multiselect("問題種別を選択", READING_QUESTION_TYPES, default=["語順並べ替え問題", "内容一致問題", "空所補充問題"])
+    st.markdown("#### 選択した問題種別ごとの問題数")
+    st.caption("選択した種別だけ問題数を設定します。合計は1〜10問にしてください。")
     default_counts = {"語順並べ替え問題": 2, "内容一致問題": 2, "空所補充問題": 1}
-    question_counts = {question_type: st.number_input(f"{question_type}（問）", min_value=0, max_value=10, value=default_counts.get(question_type, 0), step=1, key=f"reading_count_{question_type}") for question_type in READING_QUESTION_TYPES}
+    question_counts = {question_type: st.number_input(f"{question_type}（問）", min_value=0, max_value=10, value=default_counts.get(question_type, 0), step=1, key=f"reading_count_{question_type}") for question_type in selected_question_types}
     question_plan = {question_type: int(count) for question_type, count in question_counts.items() if count > 0}
     total_questions = sum(question_plan.values())
     st.info(f"合計 {total_questions} 問")
