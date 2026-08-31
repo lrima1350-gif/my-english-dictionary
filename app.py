@@ -244,14 +244,15 @@ def fetch_lesson_cards(client: Client, lesson_id: str) -> list[dict[str, Any]]:
 
 
 def lesson_label(lesson: dict[str, Any]) -> str:
-    date, title, unit = lesson.get("lesson_date") or "日付未設定", lesson.get("title") or "無題の授業", lesson.get("unit")
-    return f"{date}｜{title}" + (f"（{unit}）" if unit else "")
+    date, title, school, unit = lesson.get("lesson_date") or "日付未設定", lesson.get("title") or "無題の授業", lesson.get("school") or "校舎未設定", lesson.get("unit")
+    return f"{date}｜{school}｜{title}" + (f"（{unit}）" if unit else "")
 
 
 def lesson_settings(client: Client) -> None:
     st.subheader("授業・単元の設定")
     st.caption("授業を作成すると、その授業ごとにタイムラインを記録できます。")
     with st.form("lesson_form", clear_on_submit=True):
+        school = st.text_input("校舎", placeholder="例：〇〇校")
         title = st.text_input("授業名 *", placeholder="例：英語コミュニケーションI")
         unit = st.text_input("単元名", placeholder="例：Lesson 3 Food and Culture")
         lesson_date = st.date_input("授業日", value=datetime.now().date())
@@ -264,7 +265,7 @@ def lesson_settings(client: Client) -> None:
         return
     now = datetime.now(timezone.utc)
     try:
-        client.collection("lessons").add({"title": title.strip(), "unit": unit.strip(), "lesson_date": lesson_date.isoformat(), "memo": memo.strip(), "created_at": now, "updated_at": now})
+        client.collection("lessons").add({"school": school.strip(), "title": title.strip(), "unit": unit.strip(), "lesson_date": lesson_date.isoformat(), "memo": memo.strip(), "created_at": now, "updated_at": now})
         st.success("授業を作成しました。タイムラインタブからカードを追加できます。")
     except Exception as exc:
         show_firestore_error("授業を作成", exc)
@@ -296,13 +297,13 @@ def lesson_timeline(client: Client) -> None:
         st.session_state.pop("selected_lesson_id", None)
         st.subheader("授業ダッシュボード")
         st.caption("授業を選ぶと、その授業のタイムラインを開けます。")
-        search_query = st.text_input("授業を検索", placeholder="授業名・単元名・メモ・日付で検索", key="lesson_dashboard_search").strip().casefold()
-        unit_tags = sorted({lesson.get("unit") for lesson in lessons if lesson.get("unit")})
-        selected_units = st.multiselect("単元タグで絞り込み", unit_tags, placeholder="単元名を検索・選択", key="timeline_units")
+        search_query = st.text_input("校舎・単元名・メモを検索", placeholder="校舎・単元名・メモで検索", key="lesson_dashboard_search").strip().casefold()
+        schools = sorted({lesson.get("school") or "校舎未設定" for lesson in lessons})
+        selected_schools = st.multiselect("校舎で絞り込み", schools, placeholder="校舎名を検索・選択", key="timeline_schools")
         filtered_lessons = [
             lesson for lesson in lessons
-            if (not selected_units or lesson.get("unit") in selected_units)
-            and (not search_query or search_query in " ".join(str(lesson.get(field) or "") for field in ("title", "unit", "memo", "lesson_date")).casefold())
+            if (not selected_schools or (lesson.get("school") or "校舎未設定") in selected_schools)
+            and (not search_query or search_query in " ".join(str(lesson.get(field) or "") for field in ("school", "unit", "memo")).casefold())
         ]
         if not filtered_lessons:
             st.info("条件に一致する授業はありません。")
@@ -317,19 +318,22 @@ def lesson_timeline(client: Client) -> None:
             lesson_id = card.get("lesson_id")
             if lesson_id:
                 card_counts[lesson_id] = card_counts.get(lesson_id, 0) + 1
-        for start in range(0, len(filtered_lessons), 2):
-            columns = st.columns(2)
-            for column, lesson in zip(columns, filtered_lessons[start:start + 2]):
-                with column:
-                    with st.container(border=True):
-                        st.markdown(f"#### {lesson.get('title') or '無題の授業'}")
-                        st.caption(f"📅 {lesson.get('lesson_date') or '日付未設定'}　🏷️ {lesson.get('unit') or '単元未設定'}")
-                        if lesson.get("memo"):
-                            st.write(lesson["memo"])
-                        st.caption(f"🕒 タイムラインカード {card_counts.get(lesson['id'], 0)} 件")
-                        if st.button("タイムラインを開く", key=f"open_lesson_{lesson['id']}", use_container_width=True):
-                            st.session_state.selected_lesson_id = lesson["id"]
-                            st.rerun()
+        for school in sorted({lesson.get("school") or "校舎未設定" for lesson in filtered_lessons}):
+            st.markdown(f"### 🏫 {school}")
+            school_lessons = [lesson for lesson in filtered_lessons if (lesson.get("school") or "校舎未設定") == school]
+            for start in range(0, len(school_lessons), 2):
+                columns = st.columns(2)
+                for column, lesson in zip(columns, school_lessons[start:start + 2]):
+                    with column:
+                        with st.container(border=True):
+                            st.markdown(f"#### {lesson.get('title') or '無題の授業'}")
+                            st.caption(f"📅 {lesson.get('lesson_date') or '日付未設定'}　🏷️ {lesson.get('unit') or '単元未設定'}")
+                            if lesson.get("memo"):
+                                st.write(lesson["memo"])
+                            st.caption(f"🕒 タイムラインカード {card_counts.get(lesson['id'], 0)} 件")
+                            if st.button("タイムラインを開く", key=f"open_lesson_{lesson['id']}", use_container_width=True):
+                                st.session_state.selected_lesson_id = lesson["id"]
+                                st.rerun()
         return
     lesson = selected_lesson
     if st.button("← 授業ダッシュボードに戻る", key="back_to_lesson_dashboard"):
