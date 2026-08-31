@@ -340,6 +340,20 @@ def lesson_timeline(client: Client) -> None:
         st.session_state.pop("selected_lesson_id", None)
         st.rerun()
     st.subheader(lesson_label(lesson))
+    with st.expander("校舎を設定・変更"):
+        with st.form(f"lesson_school_form_{lesson['id']}"):
+            school = st.text_input("校舎", value=lesson.get("school") or "", placeholder="例：〇〇校")
+            submitted = st.form_submit_button("校舎を保存する")
+        if submitted:
+            if not school.strip():
+                st.warning("校舎名を入力してください。")
+            else:
+                try:
+                    client.collection("lessons").document(lesson["id"]).update({"school": school.strip(), "updated_at": datetime.now(timezone.utc)})
+                    st.success("校舎を更新しました。")
+                    st.rerun()
+                except Exception as exc:
+                    show_firestore_error("校舎を更新", exc)
     if lesson.get("memo"):
         st.caption(f"授業メモ: {lesson['memo']}")
     try:
